@@ -1,0 +1,16 @@
+{
+  "name": "miku-toolbox-skills",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "build": "npm test && npm run build:bundle:zip",
+    "build:bundle": "node scripts/build-skill-bundle.mjs",
+    "build:bundle:zip": "node scripts/build-skill-bundle-zip.mjs",
+    "sync:codex": "node scripts/sync-codex-skill.mjs"
+  }
+}

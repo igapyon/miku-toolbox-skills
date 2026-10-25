@@ -1,0 +1,86 @@
+name: Build And Upload Release Asset
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "GitHub Release tag to attach the skill bundle ZIP to"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.release.tag_name || github.event.inputs.tag_name, 'v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag_name || github.event.release.tag_name || github.ref }}
+
+      - name: Setup Node.js for bundle creation
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Build release bundle
+        run: npm run build
+
+      - name: Verify release tag version
+        id: release_version
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag_name || github.event.release.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          case "${VERSION}" in
+            "${PACKAGE_VERSION}"|"${PACKAGE_VERSION}".*) ;;
+            *)
+              echo "Release tag version (${VERSION}) must match package.json version (${PACKAGE_VERSION}) or add a dot suffix." >&2
+              exit 1
+              ;;
+          esac
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "package_version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release ZIP
+        id: prepare_zip
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.release_version.outputs.package_version }}
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          source_zip="bundle/igapyon-miku-toolbox-skills-${PACKAGE_VERSION}.zip"
+          target_zip="release-assets/igapyon-miku-toolbox-skills-${RELEASE_VERSION}.zip"
+          test -s "${source_zip}"
+          mkdir -p release-assets
+          cp "${source_zip}" "${target_zip}"
+          echo "zip_path=${target_zip}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release ZIP on minimum supported Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Check staged release ZIP
+        env:
+          STAGED_ZIP: ${{ steps.prepare_zip.outputs.zip_path }}
+        run: node scripts/verify-release-zip.mjs "$STAGED_ZIP"
+
+      - name: Upload ZIP to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.event.release.tag_name || github.ref_name }}
+          files: ${{ steps.prepare_zip.outputs.zip_path }}
+          draft: false
+          prerelease: false
